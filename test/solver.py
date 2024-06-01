@@ -9,17 +9,16 @@ current_path = os.getcwd()
 sys.path.append(current_path)
 
 from EasyProb import GetEasyProb
-import numpy as np
+import math
 # create an easy problem instance
-dim = 1000
+dim = 100
 easy_prob = GetEasyProb.UnconstrProb()
 # initialize problem
 easy_prob.init_prob_dim(dim)
-easy_prob.init_prob_x0(np.zeros(dim))
 easy_prob.get_obj_func()
 
 from Subspace import Solver
-# use stochastic direct search solver to solve the easy problem
+# use subspace solver to solve the easy problem
 # create solver
 solver = Solver.solver(easy_prob)
 # initialize solver
@@ -29,29 +28,55 @@ mom_num
 ds_point_pair_num
 gd_num
 '''
-max_iter = 1e6
-mom_num=3
-mom_step_size_0=1
-ds_point_pair_num =10
+max_iter=200000
+max_nfev=200000
+
+subspace_option = [4,1,4]
+trick_option = [1,1,1,1,1]
+# use proportion
+if trick_option[1] == 1:
+    gd_sample_num_option = [0.2,1.2]
+else:
+    gd_sample_num_option = 1.2
+
+mom_step_size_0=0.1
 ds_step_size_tol=1e-8
-ds_step_size_0=10
-gd_num=5
-gd_sample_num=20
-gd_step_size_0=1
-gd_sample_size_0=1
-tr_radius_0 = 0.01
-tr_radius_max=10
-neta=0.01
+ds_step_size_0=0.1*math.sqrt(dim)
+gd_step_size_0=0.5
+gd_sample_size_0=1e-6
+
+tr_radius_0 = 0.2*math.sqrt(dim)
+tr_radius_tol=1e-6
+tr_radius_max=10*math.sqrt(dim)
+
 rou_1_bar=0.25
 rou_2_bar=0.75
-gamma_1=0.25
+gamma_1=0.8
 gamma_2=2
-solver.init_solver(max_iter,mom_num,mom_step_size_0,
-                   ds_point_pair_num,ds_step_size_tol,ds_step_size_0,
-                   gd_num,gd_sample_num,gd_step_size_0,gd_sample_size_0,
-                   tr_radius_0,
-                   tr_radius_max,neta,rou_1_bar,rou_2_bar,gamma_1,gamma_2)
+
+solver.init_solver(max_iter,max_nfev,
+                   subspace_option,trick_option,
+                   gd_sample_num_option,
+                   mom_step_size_0,
+                   ds_step_size_tol,ds_step_size_0,
+                   gd_step_size_0,gd_sample_size_0,
+                   tr_radius_0,tr_radius_tol,
+                   tr_radius_max,rou_1_bar,rou_2_bar,gamma_1,gamma_2)
 # solve problem by the solver
 solver.solve()
 # show result
 solver.display_result()
+
+# draw result of the solver
+import matplotlib.pyplot as plt
+fig, axes = plt.subplots(2, 3, figsize=(14,7)) # 7*14
+(ax1, ax2, ax3), (ax4, ax5, ax6) = axes
+solver.draw_result(ax1,'niter')
+solver.draw_result(ax2,'nfev')
+solver.draw_result(ax3,'mom_step_size')
+solver.draw_result(ax4,'ds_step_size')
+solver.draw_result(ax5,'gd_step_size')
+solver.draw_result(ax6,'tr_radius')
+fig.suptitle(f'subspace method result on {easy_prob.prob_name} with dimension = {easy_prob.dim}')
+fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+plt.show()

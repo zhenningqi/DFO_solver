@@ -11,7 +11,7 @@ sys.path.append(current_path)
 from EasyProb import GetEasyProb
 import numpy as np
 # create an easy problem instance
-dim = 1000
+dim = 500
 easy_prob = GetEasyProb.UnconstrProb()
 # initialize problem
 easy_prob.init_prob_dim(dim)
@@ -25,4 +25,13 @@ pdfosolver.solve()
 # res = pdfosolver.res
 # print(res.nfev)
 # print(type(res.fun_history))
+
+# show result
 pdfosolver.display_result()
+# draw result
+import matplotlib.pyplot as plt
+fig, ax = plt.subplots(1, 1, figsize=(15,6)) # 6*15
+pdfosolver.draw_result(ax)
+fig.suptitle(f'pdfo result on {easy_prob.prob_name} with dimension = {easy_prob.dim}')
+fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+plt.show()

@@ -10,12 +10,21 @@ class PDFOsolver:
         '''
         self.prob = prob
         self.res = None
+        self.max_nfev = None
+        self.max_iter = None
+
+    def init_solver(self,max_iter,max_nfev):
+        self.max_iter = max_iter
+        self.max_nfev = max_nfev
 
     def solve(self):
         '''
         run the pdfo solver
         '''
-        self.res = pdfo.pdfo(self.prob.obj_func, self.prob.x0)
+        if self.prob.prob_name == 'self constructed rosenbrock':
+            self.res = pdfo.pdfo(self.prob.obj_func, self.prob.x0,options={'ftarget':1e-5,'maxfev':self.max_nfev})
+        else:
+            self.res = pdfo.pdfo(self.prob.obj_func, self.prob.x0,options={'maxfev':self.max_nfev})
     
     def display_result(self):
         '''
@@ -45,4 +54,16 @@ class PDFOsolver:
         Name of the Powell method used.
         '''
         print(self.res)
+
+    def draw_result(self,ax):
+        '''
+        input:
+        ax
+        '''
+        # marker='o'
+        ax.plot(self.res.fun_history, linestyle='-', color='b', label='pdfo')
+        ax.set_xlabel('number of function evaluations')
+        ax.set_ylabel('function value at each function evaluation')
+        ax.legend()
+
 

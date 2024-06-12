@@ -9,12 +9,12 @@ However, python will set the directory where the code file is to default path, t
 Thus, if we want to use import, we should first set the project root directory into default path.
 '''
 current_path = os.getcwd()
-print(current_path)
 sys.path.append(current_path)
 
 from Subspace.func import generate_rand_points_on_sphere
 from Subspace.func import quadratic_regression
 from Subspace.func import solve_for_tau
+from Subspace.func import linear_regression
 
 # record all the needed information for output
 class his_manager:
@@ -61,6 +61,7 @@ class solver:
         self.trick_option = None
         self.subspace_option = None
         self.gd_sample_num_option = None
+        self.gd_estimator_index = None
         
         # parameters needed to be initialized
         self.max_iter = None # int; max number of iterations
@@ -116,6 +117,8 @@ class solver:
         self.gd_temp_y = None
         self.gd_min_x = None
         self.gd_min_y = None
+        self.gd_estimator = None
+
         # subspace
         self.sub_basis = None # ndarray; subspace basis consist of mom_directions, ds_directions, gd_directions
         self.sub_dim = None # int; subspace dimension
@@ -133,18 +136,40 @@ class solver:
         self.p_star_norm = None
 
     def init_solver(self,max_iter,max_nfev,
-                    subspace_option=[1,1,1],trick_option=[0,0,0,0,0],
-                    gd_sample_num_option=[0.1,1],
+                    subspace_option=[4,0,1],trick_option=[1,0,1,1,0],
+                    gd_sample_num_option=[0.1,1],gd_estimator_index='FFD',
                     mom_step_size_0=0.1,
                     ds_step_size_tol=1e-8,ds_step_size_0=0.1,
                     gd_step_size_0=0.5,gd_sample_size_0=1e-6,
                     tr_radius_0=0.2,tr_radius_tol=1e-3,
                     tr_radius_max=10,rou_1_bar=0.25,rou_2_bar=0.75,gamma_1=0.8,gamma_2=2):
-        
+        '''
+        input:
+        max_iter
+        max_nfev
+        subspace_option
+        trick_option
+        gd_sample_num_option
+        gd_estimator_index
+
+        mom_step_size_0 -- float; initial step size when doing momentum trial
+        ds_step_size_tol
+        ds_step_size_0 -- float; the initial step size for direct search trial
+        gd_step_size_0 -- float; initial step size when doing gradient trial
+        gd_sample_size_0 -- float; initial step size of estimating gradient
+        tr_radius_0 -- float; initial trust region radius
+        tr_radius_tol
+        tr_radius_max
+        rou_1_bar
+        rou_2_bar
+        gamma_1
+        gamma_2
+        '''
         # options
         self.subspace_option = subspace_option
         self.trick_option = trick_option
         self.gd_sample_num_option = gd_sample_num_option
+        self.gd_estimator_index = gd_estimator_index
         
         # parameters needed to be initialized
         self.max_iter = max_iter
@@ -171,7 +196,7 @@ class solver:
             self.gd_sample_num = math.ceil(gd_sample_num_option*self.dim)
         # trust region
         self.tr_radius_tol = tr_radius_tol
-        self.tr_radius_max = tr_radius_max
+        self.tr_radius_max = tr_radius_max*math.sqrt(self.dim)
         self.rou_1_bar = rou_1_bar
         self.rou_2_bar = rou_2_bar
         self.gamma_1 = gamma_1
@@ -189,7 +214,7 @@ class solver:
         self.mom_flag = 0
         self.mom_min_y = float('inf')
         # ds
-        self.ds_step_size = ds_step_size_0
+        self.ds_step_size = ds_step_size_0*math.sqrt(self.dim)
         self.ds_directions = np.zeros((self.dim,1))
         self.ds_flag = 0
         self.ds_min_y = float('inf')
@@ -202,7 +227,7 @@ class solver:
         # model
         self.model_min_y = float('inf')
         # trust region
-        self.tr_radius = tr_radius_0
+        self.tr_radius = tr_radius_0*math.sqrt(self.dim)
         self.tr_flag = 0
 
     def get_func_val(self,x):
@@ -254,7 +279,7 @@ class solver:
     def ds_step(self):
         D = generate_rand_points_on_sphere(self.dim, num_points=self.ds_point_pair_num)
         ds_directions_index = []
-        for i in range(self.ds_point_pair_num):
+        for i in range(D.shape[1]):
             d = D[:,[i]]
             x_temp = self.x_current + self.ds_step_size*d
             y_temp = self.get_func_val(x_temp)
@@ -300,18 +325,69 @@ class solver:
         if self.ds_flag >= 1:
             self.ds_directions = D[:,ds_directions_index]
 
+    def BSG(self):
+        B = generate_rand_points_on_sphere(self.dim, num_points=self.gd_sample_num)
+        x_sample = self.x_current + self.gd_sample_size*B
+        y_sample = np.apply_along_axis(self.get_func_val, axis=0, arr=x_sample) # 1D array
+        index = np.argmin(y_sample)
+        self.gd_min_x = x_sample[:,[index]]
+        self.gd_min_y = y_sample[index]
+        grad = self.dim*np.mean(((y_sample-self.y_current)/self.gd_sample_size)*B, axis=1).reshape(-1,1) # using broadcast
+        return grad
+    
+    def FFD(self):
+        B = np.eye(self.dim)
+        x_sample = self.x_current + self.gd_sample_size*B
+        y_sample = np.apply_along_axis(self.get_func_val, axis=0, arr=x_sample) # 1D array
+        index = np.argmin(y_sample)
+        self.gd_min_x = x_sample[:,[index]]
+        self.gd_min_y = y_sample[index]
+        grad = np.sum(((y_sample-self.y_current)/self.gd_sample_size)*B, axis=1).reshape(-1,1) # using broadcast
+        return grad
+    
+    def CFD(self):
+        B1 = np.eye(self.dim)
+        B2 = -B1
+        x_sample_1 = self.x_current + self.gd_sample_size*B1
+        y_sample_1 = np.apply_along_axis(self.get_func_val, axis=0, arr=x_sample_1) # 1D array
+        x_sample_2 = self.x_current + self.gd_sample_size*B2
+        y_sample_2 = np.apply_along_axis(self.get_func_val, axis=0, arr=x_sample_2) # 1D array
+        index_1 = np.argmin(y_sample_1)
+        index_2 = np.argmin(y_sample_2)
+        if y_sample_1[index_1] < y_sample_2[index_2]:
+            self.gd_min_x = x_sample_1[:,[index_1]]
+            self.gd_min_y = y_sample_1[index_1]
+        else:
+            self.gd_min_x = x_sample_2[:,[index_2]]
+            self.gd_min_y = y_sample_2[index_2]
+        grad = np.sum(((y_sample_1-y_sample_2)/(2*self.gd_sample_size))*B1, axis=1).reshape(-1,1) # using broadcast
+        return grad
+    
+    def LI(self):
+        B = generate_rand_points_on_sphere(self.dim, num_points=self.dim)
+        x_sample = self.x_current + self.gd_sample_size*B
+        y_sample = np.apply_along_axis(self.get_func_val, axis=0, arr=x_sample) # 1D array
+        delta_y = y_sample - self.y_current
+        index = np.argmin(y_sample)
+        self.gd_min_x = x_sample[:,[index]]
+        self.gd_min_y = y_sample[index]
+        grad = linear_regression((self.gd_sample_size*B).T,delta_y)
+        return grad
+    
+    def init_gd_estimator(self):
+        if self.gd_estimator_index == 'BSG':
+            self.gd_estimator = self.BSG
+        elif self.gd_estimator_index == 'FFD':
+            self.gd_estimator = self.FFD
+        elif self.gd_estimator_index == 'CFD':
+            self.gd_estimator = self.CFD
+        elif self.gd_estimator_index == 'LI':
+            self.gd_estimator = self.LI
+
     def gd_step(self):
         gd_directions = []
         for _ in range(self.gd_num):
-            B = generate_rand_points_on_sphere(self.dim, num_points=self.gd_sample_num)
-            x_sample = self.x_current + self.gd_sample_size*B
-            y_sample = np.apply_along_axis(self.get_func_val, axis=0, arr=x_sample) # 1D array
-            
-            index = np.argmin(y_sample)
-            self.gd_min_x = x_sample[:,[index]]
-            self.gd_min_y = y_sample[index]
-
-            grad = np.mean(((y_sample-self.y_current)/self.gd_sample_size)*B, axis=1).reshape(-1,1) # using broadcast
+            grad = self.gd_estimator()
             x_temp = self.x_current - self.gd_step_size*grad
             y_temp = self.get_func_val(x_temp)
 
@@ -481,9 +557,11 @@ class solver:
         # update tr_dadius
         if self.tr_flag < self.rou_1_bar:
             self.tr_radius *= self.gamma_1
+            self.gd_sample_size = self.tr_radius*1e-6
         else:
             if self.tr_flag > self.rou_2_bar and self.p_star_norm >= 0.5*self.tr_radius:
                 self.tr_radius = min(self.tr_radius*self.gamma_2,self.tr_radius_max)
+                self.gd_sample_size = self.tr_radius*1e-6
 
         # 0: this step has been jumped
         # n > 0: n directions have been chosen into subsapce basis
@@ -556,6 +634,7 @@ class solver:
 
     def solve(self):
         while True:
+            # print(self.y_current)
             self.mom_step()
             if self.mom_flag == -1:
                 self.next_iter(self.mom_temp_x,self.mom_temp_y)

@@ -7,12 +7,12 @@ def rosenbrock(x):
     '''
     a = 1.0
     b = 100.0
-    return sum(b * (x[1:] - x[:-1] ** 2) ** 2 + (a - x[:-1]) ** 2)
+    return np.sum(b * (x[1:] - x[:-1] ** 2) ** 2 + (a - x[:-1]) ** 2)
 
 
 # this class is defined for an easy unconstrained problem created by myself
 class UnconstrProb:
-    def __init__(self,name='easyprob'):
+    def __init__(self,name='self constructed rosenbrock'):
         self.prob_name = name # string; the name of the problem in cutest
         self.dim = None # integer; problem dimension
         self.x0 = None # ndarray; start point of the iteration
